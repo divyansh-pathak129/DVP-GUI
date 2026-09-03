@@ -1,0 +1,7 @@
+pandas
+numpy
+matplotlib
+seaborn
+plotly
+openpyxl
+# tkinter ships with standard Python (Windows/macOS). On Linux: sudo apt install python3-tk
