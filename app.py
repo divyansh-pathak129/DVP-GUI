@@ -1,19 +1,4 @@
-"""
-app.py  —  Air Quality Analysis Dashboard (Tkinter GUI)
-=======================================================
-The presentation layer. It wires the compute module (air_analysis) and the
-plotting module (visualizations) into a clickable desktop dashboard.
-
-Rubric coverage from this file:
-  - GUI with a Python GUI library (Tkinter + ttk)
-  - file handling / exceptions surfaced as friendly dialogs
-  - embeds matplotlib/seaborn figures via FigureCanvasTkAgg
-  - launches the Plotly interactive chart and the Excel export
-
-Run:  python app.py
-"""
-
-from __future__ import annotations
+rom __future__ import annotations
 import os
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -28,9 +13,8 @@ import visualizations as viz
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_CSV = os.path.join(HERE, "data", "city_day.csv")
 OUT_DIR = os.path.join(HERE, "output")
-DEFAULT_CITY = "Mumbai"   # change to "Pune" once a Pune CSV is loaded
+DEFAULT_CITY = "Mumbai"
 
-# (button label, visualizations function) — drives the chart buttons.
 CHART_BUILDERS = [
     ("AQI trend",            viz.fig_aqi_trend),
     ("Seasonal boxplot",     viz.fig_seasonal_box),
@@ -56,7 +40,6 @@ class AirQualityApp(tk.Tk):
         # Try to auto-load the bundled dataset on startup.
         self._load_path(DEFAULT_CSV, announce=False)
 
-    # ---------------------------------------------------------------- layout
     def _build_layout(self):
         # --- top control bar ---
         top = ttk.Frame(self, padding=8)
@@ -104,7 +87,6 @@ class AirQualityApp(tk.Tk):
         ttk.Label(self, textvariable=self.status, relief="sunken",
                   anchor="w", padding=4).pack(side="bottom", fill="x")
 
-    # -------------------------------------------------------------- data load
     def on_load(self):
         path = filedialog.askopenfilename(
             title="Select an air-quality CSV",
@@ -144,7 +126,6 @@ class AirQualityApp(tk.Tk):
         self._refresh_stats(city)
         self.show_chart(viz.fig_seasonal_box)  # sensible default view
 
-    # ----------------------------------------------------------------- charts
     def show_chart(self, builder):
         if self.city_df is None:
             return
@@ -171,7 +152,6 @@ class AirQualityApp(tk.Tk):
         self.stats_box.insert("end", f"days: {n_days}   AQI days: {n_aqi}\n\n")
         self.stats_box.insert("end", stats.to_string())
 
-    # ------------------------------------------------------------- extra tools
     def on_plotly(self):
         if self.city_df is None:
             return

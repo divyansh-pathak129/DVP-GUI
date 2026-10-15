@@ -14,7 +14,7 @@ See *"Getting real Pune data"* below.
 ## 1. Setup & run
 
 ```bash
-pip install -r requirements.txt          # Linux also: sudo apt install python3-tk
+pip install -r requirements.txt          # Li   nux also: sudo apt install python3-tk
 python app.py
 ```
 
@@ -22,6 +22,32 @@ The app auto-loads `data/city_day.csv` and opens on Mumbai. Use the **City**
 dropdown to switch cities, the left buttons to draw charts, **Interactive
 (Plotly)** to open a zoomable browser chart, and **Export Excel** for a
 multi-sheet report.
+
+---
+
+## 1b. Web version (frontend + backend + database)
+
+```bash
+pip install -r requirements.txt
+python server.py          # open http://127.0.0.1:5000
+python test_server.py     # backend smoke test
+```
+
+- **Backend:** `server.py` (Flask) reuses `air_analysis.py` for all maths.
+- **Database:** SQLite file `aqi.db`, created and seeded from
+  `data/city_day.csv` on first run. Table `readings`, primary key
+  `(city, date)` — uploading a CSV upserts, so re-uploads never duplicate.
+- **Frontend:** `static/index.html` — city picker, KPI tiles, 6 interactive
+  Plotly charts, stats + worst-days tables, CSV upload, Excel export.
+
+| Endpoint | What it returns |
+|---|---|
+| `GET /api/cities` | cities with day counts and date range |
+| `GET /api/cities/<city>` | stats, seasonal, buckets, heatmap, correlation, worst days, time series |
+| `GET /api/cities/<city>/report.xlsx` | the multi-sheet Excel report |
+| `POST /api/upload` (form field `file`) | imports a CSV into the DB |
+
+To reset the database, delete `aqi.db` and restart.
 
 ---
 

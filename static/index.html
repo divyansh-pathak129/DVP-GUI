@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Air Quality Dashboard</title>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #fff; --text: #1d2330; --muted: #667085;
+    --border: #e3e6eb; --accent: #1f6feb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f1115; --card: #181b21; --text: #e6e8ec; --muted: #9aa1ad;
+            --border: #2a2f38; --accent: #4c8dff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.45 system-ui, sans-serif; background: var(--bg); color: var(--text); }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+           padding: 12px 16px; background: var(--card); border-bottom: 1px solid var(--border); }
+  header h1 { font-size: 18px; margin: 0 auto 0 0; }
+  select, button, label.btn { font: inherit; padding: 6px 12px; border-radius: 6px;
+           border: 1px solid var(--border); background: var(--card); color: var(--text); cursor: pointer; }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  label.btn input { display: none; }
+  main { padding: 16px; max-width: 1400px; margin: 0 auto; }
+  #status { color: var(--muted); margin-bottom: 12px; min-height: 1.4em; }
+  #status.error { color: #d93025; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .kpi, .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+  .kpi small { color: var(--muted); display: block; }
+  .kpi b { font-size: 22px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr)); gap: 16px; }
+  .card h2 { font-size: 14px; margin: 0 0 8px; }
+  .chart { height: 340px; }
+  .wide { grid-column: 1 / -1; }
+  .table-wrap { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 5px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; }
+  th { color: var(--muted); font-weight: 600; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Air Quality Dashboard</h1>
+  <label for="city">City</label>
+  <select id="city"></select>
+  <label class="btn">Upload CSV… <input type="file" id="upload" accept=".csv"></label>
+  <button class="primary" id="export">Export Excel</button>
+</header>
+<main>
+  <div id="status" role="status">Loading…</div>
+  <div class="kpis">
+    <div class="kpi"><small>Days of data</small><b id="k-days">–</b></div>
+    <div class="kpi"><small>Average AQI</small><b id="k-avg">–</b></div>
+    <div class="kpi"><small>Worst season</small><b id="k-worst">–</b></div>
+    <div class="kpi"><small>Cleanest season</small><b id="k-best">–</b></div>
+  </div>
+  <div class="grid">
+    <div class="card wide"><h2>AQI &amp; particulate trend</h2><div class="chart" id="c-trend"></div></div>
+    <div class="card"><h2>AQI by season</h2><div class="chart" id="c-season"></div></div>
+    <div class="card"><h2>Days in each AQI category</h2><div class="chart" id="c-buckets"></div></div>
+    <div class="card wide"><h2>Average AQI by month and year</h2><div class="chart" id="c-heat"></div></div>
+    <div class="card"><h2>Average pollutant levels</h2><div class="chart" id="c-poll"></div></div>
+    <div class="card"><h2>Pollutant / AQI correlation</h2><div class="chart" id="c-corr"></div></div>
+    <div class="card"><h2>Summary statistics</h2><div class="table-wrap"><table id="t-stats"></table></div></div>
+    <div class="card"><h2>10 worst days</h2><div class="table-wrap"><table id="t-worst"></table></div></div>
+  </div>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const SEASONS = ["Winter", "Summer", "Monsoon", "Post-Monsoon"];
+const BUCKET_COLORS = { Good: "#2ecc71", Satisfactory: "#a3d977", Moderate: "#f1c40f",
+                        Poor: "#e67e22", "Very Poor": "#e74c3c", Severe: "#8e44ad" };
+const CONFIG = { responsive: true, displaylogo: false };
+
+function status(msg, isError = false) {
+  $("#status").textContent = msg;
+  $("#status").classList.toggle("error", isError);
+}
+
+async function api(url, opts) {
+  const r = await fetch(url, opts);
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body.error || r.statusText);
+  return body;
+}
+
+function layout(extra = {}) {
+  const css = getComputedStyle(document.documentElement);
+  const grid = { gridcolor: css.getPropertyValue("--border"), zerolinecolor: css.getPropertyValue("--border") };
+  return { margin: { t: 10, r: 10, b: 40, l: 50 }, paper_bgcolor: "transparent",
+           plot_bgcolor: "transparent", font: { color: css.getPropertyValue("--text") },
+           legend: { orientation: "h" }, ...extra,
+           xaxis: { ...grid, ...extra.xaxis }, yaxis: { ...grid, ...extra.yaxis } };
+}
+
+function fillTable(table, headers, rows) {
+  const tr = cells => { const r = document.createElement("tr");
+    cells.forEach(([tag, v]) => { const c = document.createElement(tag); c.textContent = v ?? "–"; r.append(c); });
+    return r; };
+  table.replaceChildren(tr(headers.map(h => ["th", h])), ...rows.map(r => tr(r.map(v => ["td", v]))));
+}
+
+async function loadCities(prefer) {
+  const cities = await api("/api/cities");
+  const names = cities.map(c => c.city);
+  $("#city").replaceChildren(...cities.map(c => new Option(`${c.city} (${c.days} days)`, c.city)));
+  if (!names.length) return status("Database is empty — upload a CSV.");
+  $("#city").value = [prefer, "Pune", "Mumbai"].find(n => names.includes(n)) || names[0];
+  await showCity($("#city").value);
+}
+
+async function showCity(city) {
+  status(`Loading ${city}…`);
+  const d = await api(`/api/cities/${encodeURIComponent(city)}`);
+  const s = d.series;
+
+  // KPIs
+  const seasons = SEASONS.filter(x => d.seasonal[x] != null);
+  const bySeason = (cmp) => seasons.reduce((a, b) => cmp(d.seasonal[a], d.seasonal[b]) ? a : b);
+  $("#k-days").textContent = d.days.toLocaleString();
+  $("#k-avg").textContent = d.stats.AQI_final?.mean?.toFixed(0) ?? "–";
+  $("#k-worst").textContent = seasons.length ? `${bySeason((a, b) => a > b)} (${d.seasonal[bySeason((a, b) => a > b)]})` : "–";
+  $("#k-best").textContent  = seasons.length ? `${bySeason((a, b) => a < b)} (${d.seasonal[bySeason((a, b) => a < b)]})` : "–";
+
+  Plotly.react("c-trend", [
+    { x: s.date, y: s.aqi, name: "AQI", line: { width: 1.5, color: "#1f6feb" } },
+    { x: s.date, y: s.pm25, name: "PM2.5", yaxis: "y2", opacity: 0.6, line: { width: 1 } },
+    { x: s.date, y: s.pm10, name: "PM10", yaxis: "y2", opacity: 0.6, line: { width: 1 } },
+  ], layout({ hovermode: "x unified", yaxis: { title: "AQI" },
+              yaxis2: { title: "µg/m³", overlaying: "y", side: "right" }, margin: { t: 10, r: 50, b: 40, l: 50 } }), CONFIG);
+
+  Plotly.react("c-season", SEASONS.map(season => ({
+    type: "box", name: season, boxpoints: false,
+    y: s.aqi.filter((v, i) => s.season[i] === season && v != null),
+  })), layout({ showlegend: false, yaxis: { title: "AQI" } }), CONFIG);
+
+  const bk = Object.keys(d.buckets);
+  Plotly.react("c-buckets", [{ type: "bar", x: bk, y: bk.map(b => d.buckets[b]), text: bk.map(b => d.buckets[b]),
+    textposition: "outside", marker: { color: bk.map(b => BUCKET_COLORS[b]) } }],
+    layout({ yaxis: { title: "Days" } }), CONFIG);
+
+  Plotly.react("c-heat", [{ type: "heatmap", z: d.heatmap.z, x: d.heatmap.months.map(m => MONTHS[m - 1]),
+    y: d.heatmap.years.map(String), colorscale: "YlOrRd", reversescale: true,
+    texttemplate: "%{z:.0f}", colorbar: { title: "AQI" } }], layout({ yaxis: { type: "category" } }), CONFIG);
+
+  const pk = Object.keys(d.pollutants);
+  Plotly.react("c-poll", [{ type: "bar", x: pk, y: pk.map(p => d.pollutants[p]), marker: { color: "#1f6feb" } }],
+    layout({ yaxis: { title: "µg/m³ (CO mg/m³)" } }), CONFIG);
+
+  Plotly.react("c-corr", [{ type: "heatmap", z: d.correlation.z, x: d.correlation.labels, y: d.correlation.labels,
+    colorscale: "RdBu", zmin: -1, zmax: 1, texttemplate: "%{z:.2f}" }],
+    layout({ yaxis: { autorange: "reversed" }, margin: { t: 10, r: 10, b: 60, l: 70 } }), CONFIG);
+
+  const statCols = ["mean", "std", "min", "max", "median"];
+  fillTable($("#t-stats"), ["", ...statCols],
+    Object.entries(d.stats).map(([k, v]) => [k === "AQI_final" ? "AQI" : k, ...statCols.map(c => v[c])]));
+  fillTable($("#t-worst"), ["Date", "AQI", "Category", "PM2.5", "PM10"],
+    d.worst.map(w => [w.Date.slice(0, 10), w.AQI_final?.toFixed(0), w.Bucket_calc, w["PM2.5"], w.PM10]));
+
+  status(`${city}: ${d.days.toLocaleString()} days, ${d.aqi_days.toLocaleString()} with AQI.`);
+}
+
+$("#city").addEventListener("change", e => showCity(e.target.value).catch(err => status(err.message, true)));
+
+$("#export").addEventListener("click", () => {
+  if ($("#city").value) location.href = `/api/cities/${encodeURIComponent($("#city").value)}/report.xlsx`;
+});
+
+$("#upload").addEventListener("change", async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const form = new FormData();
+  form.append("file", file);
+  status(`Uploading ${file.name}…`);
+  try {
+    const r = await api("/api/upload", { method: "POST", body: form });
+    await loadCities($("#city").value);
+    status(`Imported ${r.rows.toLocaleString()} rows from ${file.name}.`);
+  } catch (err) {
+    status(`Upload failed: ${err.message}`, true);
+  }
+  e.target.value = "";
+});
+
+loadCities().catch(err => status(err.message, true));
+</script>
+</body>
+</html>
